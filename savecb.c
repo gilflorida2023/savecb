@@ -74,22 +74,24 @@ static void save_image(GtkClipboard *clipboard, GdkPixbuf *pixbuf) {
         "_Cancel"
     );
 
-    // Set a default filename
-    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), "clipboard_image.png");
-
     // Add filters for common image formats.
     GtkFileFilter *png_filter = gtk_file_filter_new();
     gtk_file_filter_set_name(png_filter, "PNG Image (*.png)");
-    gtk_file_filter_add_mime_type(png_filter, "image/png");
+    gtk_file_filter_add_pattern(png_filter, "*.png");
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), png_filter);
 
     GtkFileFilter *jpeg_filter = gtk_file_filter_new();
     gtk_file_filter_set_name(jpeg_filter, "JPEG Image (*.jpg)");
-    gtk_file_filter_add_mime_type(jpeg_filter, "image/jpeg");
+    gtk_file_filter_add_pattern(jpeg_filter, "*.jpg");
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), jpeg_filter);
 
+    // Set a default filename based on a guess.
+    gchar *filename = g_strdup("clipboard_image.png");
+    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), filename);
+    g_free(filename);
+
     if (gtk_native_dialog_run(GTK_NATIVE_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-        gchar *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+        filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
         if (filename) {
             GError *error = NULL;
             // Determine the format based on the file extension.
@@ -143,30 +145,43 @@ static void on_clipboard_received_content(GtkClipboard *clipboard, GtkSelectionD
 
 // New callback to check for available targets and then request the content.
 static void on_clipboard_received_targets(GtkClipboard *clipboard, GdkAtom *targets, gint n_targets, gpointer user_data) {
-    gboolean found_supported_target = FALSE;
+    GdkAtom target_atom = NULL;
 
+    // First, check for an image target
     for (gint i = 0; i < n_targets; i++) {
         const gchar *target_name = gdk_atom_name(targets[i]);
+        if (g_str_has_prefix(target_name, "image/")) {
+            target_atom = targets[i];
+            break;
+        }
+    }
 
-        if (target_name) {
-            // Check for common text formats.
-            if (g_strcmp0(target_name, "text/plain") == 0 || g_strcmp0(target_name, "TEXT") == 0) {
-                gtk_clipboard_request_contents(clipboard, targets[i], on_clipboard_received_content, NULL);
-                found_supported_target = TRUE;
-                break; // Stop after finding a supported format.
-            }
-
-            // Check for common image formats.
-            if (g_strcmp0(target_name, "image/png") == 0) {
-                gtk_clipboard_request_contents(clipboard, targets[i], on_clipboard_received_content, NULL);
-                found_supported_target = TRUE;
+    // If no image target was found, check for a text target
+    if (target_atom == NULL) {
+        for (gint i = 0; i < n_targets; i++) {
+            const gchar *target_name = gdk_atom_name(targets[i]);
+            if (g_strcmp0(target_name, "text/plain") == 0 || g_strcmp0(target_name, "UTF8_STRING") == 0) {
+                target_atom = targets[i];
                 break;
             }
         }
     }
 
-    if (!found_supported_target) {
+    if (target_atom != NULL) {
+        // Request the content of the target that was found.
+        gtk_clipboard_request_contents(clipboard, target_atom, on_clipboard_received_content, NULL);
+    } else {
+        // Print all detected formats
         g_print("Clipboard is empty or contains an unsupported format.\n");
+        g_print("Found targets: ");
+        for (gint i = 0; i < n_targets; i++) {
+            const gchar *target_name = gdk_atom_name(targets[i]);
+            if (i > 0) {
+                g_print(", ");
+            }
+            g_print("%s", target_name);
+        }
+        g_print("\n");
         gtk_main_quit();
     }
 }
